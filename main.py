@@ -52,7 +52,6 @@ class TravelStep:
         # Інкапсуляція: захищений атрибут
         self._price = 0.0
         self.price = price # Виклик сетера для валідації
-        self._enter_time = None
 
     @property
     def price(self):
@@ -61,7 +60,7 @@ class TravelStep:
     @price.setter
     def price(self, value):
         if value < 0:
-            raise ValueError("Помилка валідації: Вартість не може бути від'ємною!")
+            raise ValueError("Вартість не може бути від'ємною!")
         self._price = value
 
     # Поліморфізм: абстрактні методи для нащадків
@@ -71,32 +70,32 @@ class TravelStep:
     def get_details(self) -> str:
         return "Деталі відсутні"
 
-    # --- 4. Менеджер контексту (Транзакційність бронювання) ---
+    # --- 4. Менеджер контексту (Транзакційне Редагування) ---
     def __enter__(self):
-        print(f"\n[System] Спроба транзакції для етапу '{self.title}'...")
-        self.status = "В ОБРОБЦІ"
-        self._enter_time = time.time()  
+        print(f"\n[System] Відкриття транзакції редагування для '{self.title}'...")
+        self._backup_state = {
+            'title': self.title,
+            'price': self._price,
+            'start_time': self.start_time,
+            'end_time': self.end_time
+        }
         return self
 
     def __exit__(self, exc_type, exc_val, traceback):
-        elapsed_time = time.time() - self._enter_time
-        timeout_limit = 5.0 
-
         if exc_type:
-            self.status = "ПОМИЛКА"
-            print(f"[System] Транзакцію скасовано через виняток: {exc_val}")
-            return True # Приглушуємо помилку для продовження роботи програми
-        elif elapsed_time > timeout_limit:
-            self.status = "EXPIRED"
-            print(f"[System] Помилка: Перевищено час очікування.")
+            self.title = self._backup_state['title']
+            self._price = self._backup_state['price']
+            self.start_time = self._backup_state['start_time']
+            self.end_time = self._backup_state['end_time']
+            print(f"⚠️ [Транзакцію скасовано] Зміни відхилено через помилку: {exc_val}")
+            return True 
         else:
-            self.status = "ЗАБРОНЬОВАНО"
-            print(f"[System] Транзакція успішна! Стан змінено на '{self.status}'.")
+            self.status = "ОНОВЛЕНО"
+            print(f"✅ [Транзакція успішна] Зміни для етапу '{self.title}' збережено!")
         return True
 
     # --- 5. Магічні методи ---
     def __lt__(self, other):
-        # Дозволяє сортувати об'єкти хронологічно
         return self.start_time < other.start_time
 
     def __repr__(self):
@@ -114,16 +113,12 @@ class Flight(TravelStep):
         self.transport = transport
         self.flight_number = flight_number
 
-    # Перевизначення методів (Поліморфізм)
     def get_icon(self) -> str:
         icons = {TransportType.PLANE: "✈️", TransportType.BUS: "🚌", TransportType.TRAIN: "🚆", TransportType.CAR: "🚗"}
         return icons.get(self.transport, "🚀")
 
     def get_details(self) -> str:
-        return f"Рейс/Маршрут: {self.flight_number}, Транспорт: {self.transport.value}"
-
-    def __repr__(self):
-        return f"Flight('{self.title}', transport={self.transport.name}, flight_num='{self.flight_number}')"
+        return f"Рейс/Маршрут: {self.flight_number}, Траспорт: {self.transport.value}"
 
 # Нащадок 2
 class HotelBooking(TravelStep):
@@ -138,9 +133,6 @@ class HotelBooking(TravelStep):
     def get_details(self) -> str:
         return f"Готель: {self.hotel_name}, Номер: {self.room_type}"
 
-    def __repr__(self):
-        return f"HotelBooking('{self.title}', hotel='{self.hotel_name}', room='{self.room_type}')"
-
 # Нащадок 3
 class Excursion(TravelStep):
     def __init__(self, start_time: datetime, end_time: datetime, title: str, price: float, location: str, guide_name: str):
@@ -153,15 +145,11 @@ class Excursion(TravelStep):
 
     def get_details(self) -> str:
         return f"Локація: {self.location}, Гід: {self.guide_name}"
-        
-    def __repr__(self):
-        return f"Excursion('{self.title}', location='{self.location}')"
 
-# --- 6. Кастомний Ітератор (Генератор) ---
+# --- 6. Кастомний Ітератор ---
 class ChronologicalIterator:
-    """Ітератор, який завжди обходить кроки подорожі у хронологічному порядку."""
     def __init__(self, steps: list):
-        self._steps = sorted(steps) # Сортування працює завдяки магічному методу __lt__
+        self._steps = sorted(steps) 
         self._index = 0
 
     def __iter__(self):
@@ -192,9 +180,7 @@ class Itinerary:
         else:
             raise IndexError("Етап з таким індексом не існує.")
 
-    # Магічний метод доступу за індексом
     def __getitem__(self, index):
-        # Повертає відсортований елемент
         return sorted(self.steps)[index]
 
     # --- 8. Серіалізація та Персистентність ---
@@ -205,15 +191,11 @@ class Itinerary:
                 self.config = AppConfig(**data)
                 self.converter.rate = self.config.eur_to_uah_rate
         except FileNotFoundError:
-            # Створення дефолтного конфігу, якщо його немає
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(asdict(self.config), f, ensure_ascii=False, indent=4)
 
     def save_system_state(self, filepath="travel_data.pkl"):
-        state = {
-            'traveler': self.traveler,
-            'steps': self.steps
-        }
+        state = {'traveler': self.traveler, 'steps': self.steps}
         with open(filepath, 'wb') as f:
             pickle.dump(state, f)
 
@@ -242,9 +224,7 @@ class Itinerary:
         if not self.steps:
             return "Маршрут порожній."
         
-        # Використовуємо кастомний ітератор для обходу
         iterator = ChronologicalIterator(self.steps)
-        
         lines = []
         user_info = f" Мандрівник: {self.traveler.name}" if self.traveler else ""
         lines.append(f"\n🗺️  ТАЙМЛАЙН МАРШРУТУ {self.config.agency_name}{user_info} 🗺️")
@@ -268,24 +248,22 @@ def main_menu():
     print("\n" + "="*50)
     print(" 🌍 ПЛАНУВАЛЬНИК ПОДОРОЖЕЙ 🌍")
     print("="*50)
-    print("1 ➕ — Додати трансфер (літак, автобус, тощо)")
-    print("2 🏨 — Додати готель")
-    print("3 🗺️  — Додати екскурсію")
-    print("4 📜 — Показати візуальний таймлайн маршруту (Магічний метод __str__)")
-    print("5 💳 — Оплатити етап (Тест контекстного менеджера)")
-    print("6 💾 — Експорт (CSV) та Збереження (Pickle)")
-    print("7 ❌ — Видалити етап")
+    print("1 ➕ — Додати новий етап (Трансфер / Готель / Екскурсія)")
+    print("2 📜 — Показати загальний таймлайн маршруту")
+    print("3 🔍 — ПОШУК та РЕДАГУВАННЯ даних (Тест 'with')")
+    print("4 🌪️  — ФІЛЬТРАЦІЯ етапів за статусом")
+    print("5 🔀 — СОРТУВАННЯ етапів (за вибором)")
+    print("6 ❌ — Видалити етап")
+    print("7 💾 — Зберегти зміни (Pickle/CSV)")
     print("0 🚪 — Вийти")
     print("="*50)
 
 if __name__ == "__main__":
-    # Ініціалізація системи
     default_traveler = Traveler(name="Sofia", email="sofia@example.com", passport_number="FT123456")
     manager = Itinerary(traveler=default_traveler)
     manager.load_config()
     manager.load_system_state()
 
-    # Нескінченний цикл із глобальним перехопленням винятків
     while True:
         main_menu()
         try:
@@ -293,82 +271,134 @@ if __name__ == "__main__":
             
             match choice:
                 case "1":
-                    print("\n--- Додавання трансферу ---")
-                    title = input("Назва маршруту (напр. Київ-Львів): ").strip()
-                    price = float(input("Вартість: "))
+                    print("\n--- Оберіть тип нового етапу ---")
+                    print("1. ✈️/🚌 Трансфер (Літак, автобус, поїзд...)")
+                    print("2. 🏨 Готель / Проживання")
+                    print("3. 🗺️  Екскурсія")
+                    sub_choice = input("Ваш вибір: ").strip()
                     
-                    print("Доступний транспорт:")
-                    for idx, t in enumerate(TransportType, 1):
-                        print(f"{idx}. {t.value}")
-                    t_choice = int(input("Оберіть номер транспорту: "))
-                    transport = list(TransportType)[t_choice - 1]
-                    
-                    number = input("Номер рейсу/автобуса/поїзда: ").strip()
-                    hours = float(input("Тривалість у годинах: "))
-                    
-                    dt_start = datetime.now() + timedelta(days=len(manager.steps))
-                    dt_end = dt_start + timedelta(hours=hours)
-                    
-                    step = Flight(dt_start, dt_end, title, price, transport, number)
-                    manager.add_step(step)
-                    print(f"✅ Додано: {repr(step)}")
+                    match sub_choice:
+                        case "1":
+                            print("\n--- Додавання трансферу ---")
+                            title = input("Назва маршруту (напр. Київ-Львів): ").strip()
+                            price = float(input("Вартість: "))
+                            print("Доступний транспорт:")
+                            for idx, t in enumerate(TransportType, 1):
+                                print(f"{idx}. {t.value}")
+                            t_choice = int(input("Оберіть номер транспорту: "))
+                            transport = list(TransportType)[t_choice - 1]
+                            number = input("Номер рейсу/автобуса/поїзда: ").strip()
+                            hours = float(input("Тривалість у годинах: "))
+                            
+                            dt_start = datetime.now() + timedelta(days=len(manager.steps))
+                            dt_end = dt_start + timedelta(hours=hours)
+                            step = Flight(dt_start, dt_end, title, price, transport, number)
+                            manager.add_step(step)
+                            print(f"✅ Трансфер додано успішно.")
+
+                        case "2":
+                            print("\n--- Додавання готелю ---")
+                            title = input("Назва етапу проживання: ").strip()
+                            price = float(input("Вартість за весь період: "))
+                            hotel = input("Назва готелю: ").strip()
+                            room = input("Тип номеру: ").strip()
+                            days = int(input("Кількість ночей: "))
+                            
+                            dt_start = datetime.now() + timedelta(days=len(manager.steps))
+                            dt_end = dt_start + timedelta(days=days)
+                            step = HotelBooking(dt_start, dt_end, title, price, hotel, room)
+                            manager.add_step(step)
+                            print("✅ Готель додано.")
+
+                        case "3":
+                            print("\n--- Додавання екскурсії ---")
+                            title = input("Назва екскурсії: ").strip()
+                            price = float(input("Вартість: "))
+                            location = input("Локація: ").strip()
+                            guide = input("Ім'я гіда: ").strip()
+                            
+                            dt_start = datetime.now() + timedelta(days=len(manager.steps))
+                            dt_end = dt_start + timedelta(hours=3)
+                            step = Excursion(dt_start, dt_end, title, price, location, guide)
+                            manager.add_step(step)
+                            print("✅ Екскурсію додано.")
+                        
+                        case _:
+                            print("⚠️ Невідомий тип етапу. Повернення в головне меню.")
 
                 case "2":
-                    print("\n--- Додавання готелю ---")
-                    title = input("Назва етапу проживання: ").strip()
-                    price = float(input("Вартість за весь період: "))
-                    hotel = input("Назва готелю: ").strip()
-                    room = input("Тип номеру: ").strip()
-                    days = int(input("Кількість ночей: "))
-                    
-                    dt_start = datetime.now() + timedelta(days=len(manager.steps))
-                    dt_end = dt_start + timedelta(days=days)
-                    
-                    step = HotelBooking(dt_start, dt_end, title, price, hotel, room)
-                    manager.add_step(step)
-                    print("✅ Готель додано.")
+                    print(manager)
 
                 case "3":
-                    print("\n--- Додавання екскурсії ---")
-                    title = input("Назва екскурсії: ").strip()
-                    price = float(input("Вартість: "))
-                    location = input("Локація: ").strip()
-                    guide = input("Ім'я гіда: ").strip()
+                    if not manager.steps:
+                        print("Маршрут порожній!")
+                        continue
                     
-                    dt_start = datetime.now() + timedelta(days=len(manager.steps))
-                    dt_end = dt_start + timedelta(hours=3)
+                    query = input("Введіть текст для пошуку етапу: ").strip().lower()
+                    found_steps = [s for s in manager.steps if query in s.title.lower()]
                     
-                    step = Excursion(dt_start, dt_end, title, price, location, guide)
-                    manager.add_step(step)
-                    print("✅ Екскурсію додано.")
+                    if not found_steps:
+                        print("⚠️ Нічого не знайдено за таким запитом.")
+                        continue
+                    
+                    print("\nЗнайдені збіги:")
+                    for idx, s in enumerate(found_steps, 1):
+                        print(f"{idx}. {s.title} (Поточна ціна: {s.price})")
+                    
+                    s_idx = int(input("Оберіть номер етапу для редагування: ")) - 1
+                    target_step = found_steps[s_idx]
+                    
+                    with target_step as active_step:
+                        new_title = input(f"Нова назва (натисніть Enter, щоб залишити '{active_step.title}'): ").strip()
+                        if new_title:
+                            active_step.title = new_title
+                        
+                        price_input = input(f"Нова вартість (натисніть Enter, щоб залишити {active_step.price}): ").strip()
+                        if price_input:
+                            active_step.price = float(price_input)
 
                 case "4":
-                    # Використання перевизначеного __str__ для красивого таймлайну
-                    print(manager)
+                    if not manager.steps:
+                        print("Маршрут порожній!")
+                        continue
+                    print("Оберіть статус для фільтрації:")
+                    print("1. ОЧІКУЄ\n2. ОНОВЛЕНО")
+                    f_choice = input("Ваш вибір: ").strip()
+                    status_map = {"1": "ОЧІКУЄ", "2": "ОНОВЛЕНО"}
+                    target_status = status_map.get(f_choice)
+                    
+                    if target_status:
+                        filtered = [s for s in manager.steps if s.status == target_status]
+                        if filtered:
+                            print(f"\n📋 Етапи зі статусом '{target_status}':")
+                            for s in filtered:
+                                print(f"  * {s}")
+                        else:
+                            print("Етапів із таким статусом не знайдено.")
+                    else:
+                        print("Невірний вибір.")
 
                 case "5":
                     if not manager.steps:
                         print("Маршрут порожній!")
                         continue
+                    print("Оберіть тип сортування для відображення:")
+                    print("1. Хронологічне (за часом початку — магічний метод __lt__)")
+                    print("2. За ціною (від найдешевших)")
+                    s_choice = input("Ваш вибір: ").strip()
                     
-                    for i, step in enumerate(manager.steps, 1):
-                        print(f"{i}. {step.title} - Стан: {step.status}")
-                    idx = int(input("Оберіть номер етапу для оплати: ")) - 1
-                    target_step = manager.steps[idx]
-                    
-                    # Використання менеджера контексту
-                    with target_step as active_booking:
-                        print(f"З'єднання з банком для списання {active_booking.price}...")
-                        time.sleep(1) # Імітація затримки
-                        # Щоб імітувати помилку, можна розкоментувати рядок нижче:
-                        # raise ConnectionError("Банк відхилив платіж!")
+                    if s_choice == "1":
+                        print("\n🕒 Хронологічний список:")
+                        for s in sorted(manager.steps):
+                            print(f"  {s}")
+                    elif s_choice == "2":
+                        print("\n💰 Список за ціною:")
+                        for s in sorted(manager.steps, key=lambda x: x.price):
+                            print(f"  {s.title} — {s.price} UAH")
+                    else:
+                        print("Невірний вибір.")
 
                 case "6":
-                    manager.save_system_state()
-                    manager.export_csv_report()
-                    print("✅ Дані успішно збережені.")
-
-                case "7":
                     if manager.steps:
                         for i, step in enumerate(manager.steps, 1):
                             print(f"{i}. {step.title}")
@@ -376,6 +406,11 @@ if __name__ == "__main__":
                         manager.delete_step(idx)
                     else:
                         print("Маршрут порожній!")
+
+                case "7":
+                    manager.save_system_state()
+                    manager.export_csv_report()
+                    print("✅ Дані успішно збережені.")
 
                 case "0":
                     manager.save_system_state()
