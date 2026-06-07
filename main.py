@@ -147,10 +147,15 @@ class Excursion(TravelStep):
         return f"Локація: {self.location}, Гід: {self.guide_name}"
 
 # --- 6. Кастомний Ітератор ---
-class ChronologicalIterator:
-    def __init__(self, steps: list):
-        self._steps = sorted(steps) 
+class TypedTravelIterator:
+    def __init__(self, steps: list, filter_type: type = None):
+        # Зберігаємо базовий масив та тип фільтрації
+        self._steps = sorted(steps)
+        self._filter_type = filter_type
         self._index = 0
+        
+        if self._filter_type:
+            self._steps = [s for s in self._steps if type(s) == self._filter_type]
 
     def __iter__(self):
         return self
@@ -217,14 +222,15 @@ class Itinerary:
                 type_name = type(step).__name__
                 start_str = step.start_time.strftime('%H:%M %d.%m.%Y')
                 end_str = step.end_time.strftime('%H:%M %d.%m.%Y')
-                writer.writerow([type_name, step.title, start_str, end_str, step.price, step.status, step.get_details()])
+                writer.writerow([type_name, step.title, start_str, end_str,\
+                                  step.price, step.status, step.get_details()])
         print(f"[System] Аналітичний звіт експортовано у '{filepath}'.")
 
-    def __str__(self):
+def __str__(self):
         if not self.steps:
             return "Маршрут порожній."
         
-        iterator = ChronologicalIterator(self.steps)
+        iterator = TypedTravelIterator(self.steps)
         lines = []
         user_info = f" Мандрівник: {self.traveler.name}" if self.traveler else ""
         lines.append(f"\n🗺️  ТАЙМЛАЙН МАРШРУТУ {self.config.agency_name}{user_info} 🗺️")
@@ -361,22 +367,41 @@ if __name__ == "__main__":
                     if not manager.steps:
                         print("Маршрут порожній!")
                         continue
-                    print("Оберіть статус для фільтрації:")
-                    print("1. ОЧІКУЄ\n2. ОНОВЛЕНО")
-                    f_choice = input("Ваш вибір: ").strip()
-                    status_map = {"1": "ОЧІКУЄ", "2": "ОНОВЛЕНО"}
-                    target_status = status_map.get(f_choice)
                     
-                    if target_status:
-                        filtered = [s for s in manager.steps if s.status == target_status]
-                        if filtered:
-                            print(f"\n📋 Етапи зі статусом '{target_status}':")
-                            for s in filtered:
-                                print(f"  * {s}")
-                        else:
-                            print("Етапів із таким статусом не знайдено.")
-                    else:
-                        print("Невірний вибір.")
+                    # --- ВИКЛИК ФУНКТОРУ КONВЕРТАЦІЇ ВАЛЮТ ЗА ДІАГРАМОЮ ---
+                    total_uah = sum(s.price for s in manager.steps)
+                    total_eur = total_uah / manager.converter.rate
+                    
+                    print("\n" + "="*45)
+                    print("📊 ФІНАНСОВИЙ АНАЛІТИЧНИЙ ЗВІТ МАРШРУТУ 📊")
+                    print("="*45)
+                    print(f" Загальний бюджет в UAH: {total_uah:.2f} грн.")
+                    print(f" Актуальний курс євро:   {manager.converter.rate} UAH/EUR")
+                    print(f" Еквівалент вартості:    {total_eur:.2f} EUR")
+                    print("="*45)
+                    
+                    # --- ПОЛІМОРФНА ФІЛЬТРАЦІЯ ЧЕРЕЗ TYPED TRAVEL ITERATOR ---
+                    print("\nОберіть тип об'єктів для структурної фільтрації:")
+                    print("1. Лише Трансфери (Flight)")
+                    print("2. Лише Проживання (HotelBooking)")
+                    print("3. Лише Екскурсії (Excursion)")
+                    print("0. Пропустити фільтрацію")
+                    f_choice = input("Ваш вибір: ").strip()
+                    
+                    target_type = None
+                    if f_choice == "1":
+                        target_type = Flight
+                    elif f_choice == "2":
+                        target_type = HotelBooking
+                    elif f_choice == "3":
+                        target_type = Excursion
+                        
+                    if f_choice != "0":
+                        # Створюємо ітератор строго за типом класу, як вказано на UML
+                        type_iterator = TypedTravelIterator(manager.steps, filter_type=target_type)
+                        print(f"\n📋 Результат фільтрації:")
+                        for s in type_iterator:
+                            print(f"  * {s.get_icon()} {s.title} — {s.price} UAH ({s.get_details()})")
 
                 case "5":
                     if not manager.steps:
